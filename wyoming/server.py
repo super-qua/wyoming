@@ -5,9 +5,11 @@ from functools import partial
 from pathlib import Path
 from typing import Callable, Set, Union
 from urllib.parse import urlparse
+import logging
 
 from .event import Event, async_get_stdin, async_read_event, async_write_event
 
+_LOGGER = logging.getLogger(__name__)
 
 class AsyncEventHandler(ABC):
     """Base class for async Wyoming event handler."""
@@ -80,7 +82,8 @@ class AsyncServer(ABC):
         writer: asyncio.StreamWriter,
     ):
         handler = handler_factory(reader, writer)
-        task = asyncio.create_task(handler.run())
+        loop = asyncio.get_event_loop()
+        task = loop.create_task(handler.run())
         self._tasks.add(task)
         task.add_done_callback(self._tasks.discard)
 
@@ -118,12 +121,27 @@ class AsyncTcpServer(AsyncServer):
         self.port = port
 
     async def run(self, handler_factory: HandlerFactory) -> None:
+        logging.basicConfig(level=logging.DEBUG)
+        
         handler_callback = partial(self._handler_callback, handler_factory)
-        server = await asyncio.start_server(
-            handler_callback, host=self.host, port=self.port
+        loop = asyncio.get_event_loop()
+        server = asyncio.start_server(
+            handler_callback, host=self.host, port=self.port, loop=loop
         )
-
-        await server.serve_forever()
+        
+        server_loop = loop.run_until_complete(server)
+        _LOGGER.debug("Server running")
+        # Serve requests until Ctrl+C is pressed
+        try:
+            loop.run_forever()
+        except KeyboardInterrupt:
+            pass
+        
+        _LOGGER.debug("Server closed")
+        # Close the server
+        server_loop.close()
+        loop.run_until_complete(server_loop.wait_closed())
+        loop.close()
 
 
 class AsyncUnixServer(AsyncServer):
@@ -138,12 +156,20 @@ class AsyncUnixServer(AsyncServer):
         self.socket_path.unlink(missing_ok=True)
 
         handler_callback = partial(self._handler_callback, handler_factory)
-        server = await asyncio.start_unix_server(
-            handler_callback, path=self.socket_path
+        loop = asyncio.get_event_loop()
+        server = asyncio.start_unix_server(
+            handler_callback, path=self.socket_path, loop=loop
         )
+        
+        server_loop = loop.run_until_complete(server)
 
+        # Serve requests until Ctrl+C is pressed
         try:
-            await server.serve_forever()
-        finally:
-            # Unlink when we're done
-            self.socket_path.unlink(missing_ok=True)
+            loop.run_forever()
+        except KeyboardInterrupt:
+            pass
+
+        # Close the server
+        server_loop.close()
+        loop.run_until_complete(server_loop.wait_closed())
+        loop.close()
