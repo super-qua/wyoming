@@ -141,7 +141,6 @@ class AsyncTcpServer(AsyncServer):
         # Close the server
         server_loop.close()
         loop.run_until_complete(server_loop.wait_closed())
-        loop.close()
 
 
 class AsyncUnixServer(AsyncServer):
@@ -172,4 +171,3 @@ class AsyncUnixServer(AsyncServer):
         # Close the server
         server_loop.close()
         loop.run_until_complete(server_loop.wait_closed())
-        loop.close()
